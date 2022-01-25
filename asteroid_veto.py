@@ -6,6 +6,10 @@ import pandas as pd
 from tqdm import tqdm
 from astropy.utils.data import download_file
 from copy import deepcopy
+from astropy.time import Time
+from time import sleep
+
+from astroquery.jplhorizons import Horizons
 
 def _query_solar_system_objects(ra, dec, times, radius=10/60, location='807',
                                 cache=False):
@@ -63,36 +67,54 @@ def _query_solar_system_objects(ra, dec, times, radius=10/60, location='807',
         df.reset_index(drop=True)
     return df
 
+def _query_horizons(name,epoch,max_tries=3):
+    passed = False
+    tries = 0
+    while ~passed & (tries < max_tries):
+        try:
+            obs = Horizons(id=name, location='807', epochs=epoch.jd)
+            passed = True
+        except:
+            tries += 1
+            sleep(5)
+    
+    eph = obs.ephemerides().to_pandas()
+
+    return eph
+
 
 def check_asteroids(coord,epoch):
-	"""
-	Find the closest asteroid to the given coordinates at the given epoch
-	
-	------
-	Inputs
-	------
-		coord : SkyCoord
-			coordinates of the target
-		epoch : astropy Time
-			epoch of the observation 
+    """
+    Find the closest asteroid to the given coordinates at the given epoch
+    
+    ------
+    Inputs
+    ------
+       coord : SkyCoord
+         coordinates of the target
+       epoch : astropy Time
+         epoch of the observation 
 
-	-------
-	Returns
-	-------
-		ast : dataframe
-			datframe containing the information of the closest asteroid.
-			The seperation is given by the sep column which is measured in 
-			arcsec.
+    -------
+    Returns
+    -------
+       ast : dataframe
+         datframe containing the information of the closest asteroid.
+         The seperation is given by the sep column which is measured in 
+         arcsec.
 
-	"""
+    """
     q = _query_solar_system_objects(coord.ra.deg,coord.dec.deg,epoch.jd)
+    if type(q) == type(None):
+        none = pd.DataFrame(columns= ['Num','Name','Class','Mv','epoch','sep'],
+                            data=[[-999,'None','None',-999,-999,-999]])
+        return none
     sep = []
     for i in range(len(q)):
         name = q['Name'][i].strip(' ')
-        obs = Horizons(id=name, location='807', epochs=epoch.jd)
-        eph = obs.ephemerides().to_pandas()
+        eph = _query_horizons(name, epoch)
         ast = SkyCoord(eph.RA[0],eph.DEC[0],unit=u.deg)
-        sep += [ast.separation(c).deg*60**2]
+        sep += [ast.separation(coord).deg*60**2]
     closest = np.argmin(sep)
     ast = deepcopy(q).iloc[closest]
     ast['sep'] = sep[closest]
